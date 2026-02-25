@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import joblib
 import numpy as np
+import pandas as pd
 
 # Initialize app ONCE
 app = FastAPI()
@@ -67,10 +68,10 @@ async def predict(
 
     # Ensure correct column order
     ordered_data = [input_dict[feature] for feature in features]
-    data_array = np.array(ordered_data).reshape(1, -1)
+    data_df = pd.DataFrame([ordered_data], columns=features)
 
     # Predict
-    prob = model.predict_proba(data_array)[0][1]
+    prob = model.predict_proba(data_df)[0][1]
     prediction = 1 if prob >= threshold else 0
 
     result = "Fraud Transaction 🚨" if prediction == 1 else "Legitimate Transaction ✅"
