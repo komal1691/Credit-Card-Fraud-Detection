@@ -1,30 +1,56 @@
+import os
+import joblib
+import numpy as np
+import pandas as pd
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-import joblib
-import numpy as np
-import pandas as pd
-
-# Initialize app ONCE
+import uvicorn
+# -------------------------------------------------
+# Initialize FastAPI app
+# -------------------------------------------------
 app = FastAPI()
 
-# Mount static folder (if using CSS/JS files)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# -------------------------------------------------
+# Safe Static Folder Mount (only if exists)
+# -------------------------------------------------
+if os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Load trained model package
-package = joblib.load("fraud_detection_package.pkl")
-model = package["model"]
-threshold = package["threshold"]
-features = package["features"]  # ensures correct feature order
+# -------------------------------------------------
+# Load Model Safely
+# -------------------------------------------------
+MODEL_PATH = os.path.join(os.getcwd(), "fraud_detection_package.pkl")
 
-# Setup templates
+try:
+    package = joblib.load(MODEL_PATH)
+    model = package["model"]
+    threshold = package["threshold"]
+    features = package["features"]
+except Exception as e:
+    print("Model loading failed:", e)
+    model = None
+    threshold = 0.5
+    features = []
+
+# -------------------------------------------------
+# Templates
+# -------------------------------------------------
 templates = Jinja2Templates(directory="templates")
 
 
-# ----------------------------
+# -------------------------------------------------
+# Health Check Route (Important for Render)
+# -------------------------------------------------
+@app.get("/health")
+async def health():
+    return {"status": "running"}
+
+
+# -------------------------------------------------
 # Home Route
-# ----------------------------
+# -------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse(
@@ -33,9 +59,9 @@ async def home(request: Request):
     )
 
 
-# ----------------------------
+# -------------------------------------------------
 # Prediction Route
-# ----------------------------
+# -------------------------------------------------
 @app.post("/predict", response_class=HTMLResponse)
 async def predict(
     request: Request,
@@ -53,6 +79,16 @@ async def predict(
     Amount: float = Form(...)
 ):
 
+    if model is None:
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "result": "Model not loaded ❌",
+                "probability": "N/A"
+            }
+        )
+
     # Create ordered feature dictionary
     input_dict = {
         "Time": Time,
@@ -66,21 +102,40 @@ async def predict(
         "Amount": Amount
     }
 
-    # Ensure correct column order
-    ordered_data = [input_dict[feature] for feature in features]
-    data_df = pd.DataFrame([ordered_data], columns=features)
+    try:
+        ordered_data = [input_dict[feature] for feature in features]
+        data_df = pd.DataFrame([ordered_data], columns=features)
 
-    # Predict
-    prob = model.predict_proba(data_df)[0][1]
-    prediction = 1 if prob >= threshold else 0
+        prob = model.predict_proba(data_df)[0][1]
+        prediction = 1 if prob >= threshold else 0
 
-    result = "Fraud Transaction 🚨" if prediction == 1 else "Legitimate Transaction ✅"
+        result = "Fraud Transaction 🚨" if prediction == 1 else "Legitimate Transaction ✅"
 
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "result": result,
-            "probability": round(float(prob), 4)
-        }
-    )
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "result": result,
+                "probability": round(float(prob), 4)
+            }
+        )
+
+    except Exception as e:
+        print("Prediction error:", e)
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "result": "Prediction Error ❌",
+                "probability": "N/A"
+            }
+        )
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, debug=True)
+
+
+
+    
